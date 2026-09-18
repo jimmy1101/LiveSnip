@@ -33,3 +33,8 @@ app_instance.pid
 .DS_Store
 Thumbs.db
 *.swp
+
+# Internal audit reports and release-only docs
+审查报告.md
+*.report.md
+使用说明.txt
