@@ -3,7 +3,8 @@ from typing import List, Optional
 from dataclasses import dataclass, field
 from PySide6.QtCore import Qt, QRectF, QPointF, QRect
 from PySide6.QtGui import (
-    QPainter, QColor, QPen, QBrush, QPixmap, QFont, QFontMetrics, QPainterPath
+    QPainter, QColor, QPen, QBrush, QPixmap, QFont, QFontMetrics, QPainterPath,
+    QPainterPathStroker
 )
 
 class AnnotationShape:
@@ -194,33 +195,94 @@ class TextShape(AnnotationShape):
 
         painter.restore()
 
-@dataclass
 class MosaicShape(AnnotationShape):
-    rect: QRectF
-    block_size: int = 12
+    def __init__(
+        self,
+        rect: Optional[QRectF] = None,
+        block_size: int = 10,
+        points: Optional[List[QPointF]] = None,
+        brush_width: int = 20,
+    ):
+        self.rect = rect
+        self.block_size = max(2, block_size)
+        self.points: List[QPointF] = list(points) if points else []
+        self.brush_width = brush_width
 
     def draw(self, painter: QPainter, base_pixmap: Optional[QPixmap] = None):
-        if base_pixmap is None or self.rect.width() <= 2 or self.rect.height() <= 2:
+        if base_pixmap is None or base_pixmap.isNull():
             return
 
-        r = self.rect.toRect()
-        # Intersect with base_pixmap bounds
-        bounded_rect = r.intersected(base_pixmap.rect())
-        if bounded_rect.isEmpty():
-            return
+        if self.points:
+            # Brush-based Mosaic (Stroke Mosaic)
+            if len(self.points) == 1:
+                fill_path = QPainterPath()
+                r = self.brush_width / 2.0
+                fill_path.addEllipse(self.points[0], r, r)
+            else:
+                path = QPainterPath()
+                path.moveTo(self.points[0])
+                for pt in self.points[1:]:
+                    path.lineTo(pt)
+                stroker = QPainterPathStroker()
+                stroker.setWidth(self.brush_width)
+                stroker.setCapStyle(Qt.PenCapStyle.RoundCap)
+                stroker.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                fill_path = stroker.createStroke(path)
 
-        painter.save()
-        # Crop region from base_pixmap
-        crop = base_pixmap.copy(bounded_rect)
+            path_bounds = fill_path.boundingRect().toAlignedRect()
+            bounded_rect = path_bounds.intersected(base_pixmap.rect())
+            if bounded_rect.isEmpty():
+                return
 
-        # Scale down to block resolution, then scale back up with FastTransformation (Nearest Neighbor)
-        small_w = max(1, bounded_rect.width() // self.block_size)
-        small_h = max(1, bounded_rect.height() // self.block_size)
-        downscaled = crop.scaled(small_w, small_h, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.FastTransformation)
-        mosaic_pixmap = downscaled.scaled(bounded_rect.width(), bounded_rect.height(), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.FastTransformation)
+            # Align bounded_rect to multiples of block_size for flicker-free / jitter-free mosaic grid
+            bs = self.block_size
+            x0 = max(0, (bounded_rect.left() // bs) * bs)
+            y0 = max(0, (bounded_rect.top() // bs) * bs)
+            x1 = min(base_pixmap.width(), ((bounded_rect.right() + bs) // bs) * bs)
+            y1 = min(base_pixmap.height(), ((bounded_rect.bottom() + bs) // bs) * bs)
 
-        painter.drawPixmap(bounded_rect.topLeft(), mosaic_pixmap)
-        painter.restore()
+            grid_rect = QRect(x0, y0, x1 - x0, y1 - y0)
+            if grid_rect.isEmpty():
+                return
+
+            crop = base_pixmap.copy(grid_rect)
+            small_w = max(1, grid_rect.width() // bs)
+            small_h = max(1, grid_rect.height() // bs)
+            downscaled = crop.scaled(small_w, small_h, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.FastTransformation)
+            mosaic_pixmap = downscaled.scaled(grid_rect.width(), grid_rect.height(), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.FastTransformation)
+
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setClipPath(fill_path, Qt.ClipOperation.IntersectClip)
+            painter.drawPixmap(grid_rect.topLeft(), mosaic_pixmap)
+            painter.restore()
+
+        elif self.rect is not None and self.rect.width() > 2 and self.rect.height() > 2:
+            # Rectangular Mosaic (Legacy / fallback)
+            r = self.rect.toRect()
+            bounded_rect = r.intersected(base_pixmap.rect())
+            if bounded_rect.isEmpty():
+                return
+
+            bs = self.block_size
+            x0 = max(0, (bounded_rect.left() // bs) * bs)
+            y0 = max(0, (bounded_rect.top() // bs) * bs)
+            x1 = min(base_pixmap.width(), ((bounded_rect.right() + bs) // bs) * bs)
+            y1 = min(base_pixmap.height(), ((bounded_rect.bottom() + bs) // bs) * bs)
+            grid_rect = QRect(x0, y0, x1 - x0, y1 - y0)
+            if grid_rect.isEmpty():
+                return
+
+            crop = base_pixmap.copy(grid_rect)
+            small_w = max(1, grid_rect.width() // bs)
+            small_h = max(1, grid_rect.height() // bs)
+            downscaled = crop.scaled(small_w, small_h, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.FastTransformation)
+            mosaic_pixmap = downscaled.scaled(grid_rect.width(), grid_rect.height(), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.FastTransformation)
+
+            painter.save()
+            painter.setClipRect(bounded_rect, Qt.ClipOperation.IntersectClip)
+            painter.drawPixmap(grid_rect.topLeft(), mosaic_pixmap)
+            painter.restore()
 
 class AnnotationManager:
     """Manages annotation shapes, active tool, undo/redo history, and canvas drawing."""
@@ -242,6 +304,38 @@ class AnnotationManager:
         self.current_color: QColor = QColor(255, 59, 48)  # Snipaste classic vibrant red
         self.current_width: int = 3
         self.is_filled: bool = False
+
+    def get_brush_diameter(self, tool_id: Optional[str] = None) -> int:
+        tid = tool_id or self.current_tool
+        w = self.current_width
+        if tid == self.TOOL_MOSAIC:
+            if w <= 2:
+                return 14
+            elif w <= 4:
+                return 26
+            elif w <= 7:
+                return 44
+            else:
+                return max(10, w * 6)
+        elif tid == self.TOOL_HIGHLIGHTER:
+            if w <= 2:
+                return 12
+            elif w <= 4:
+                return 18
+            elif w <= 7:
+                return 26
+            else:
+                return max(8, w * 4)
+        elif tid == self.TOOL_PEN:
+            if w <= 2:
+                return 6
+            elif w <= 4:
+                return 10
+            elif w <= 7:
+                return 16
+            else:
+                return max(2, w * 2)
+        return 14
 
     def push_state(self):
         self.undo_stack.append(list(self.shapes))

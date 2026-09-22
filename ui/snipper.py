@@ -371,10 +371,18 @@ class SnipperWidget(QWidget):
         self.toolbar.close_clicked.connect(self.cancel_snip)
         self.toolbar.tool_changed.connect(self._on_annot_tool_changed)
         self.toolbar.color_changed.connect(lambda c: setattr(self.annot_mgr, "current_color", c))
-        self.toolbar.width_changed.connect(lambda w: setattr(self.annot_mgr, "current_width", w))
+        self.toolbar.width_changed.connect(self._on_width_changed)
         self.toolbar.undo_clicked.connect(self._undo_annot)
         self.toolbar.redo_clicked.connect(self._redo_annot)
         self.toolbar.hide()
+
+    def _on_width_changed(self, w: int):
+        self.annot_mgr.current_width = w
+        if (self.selection_rect.isValid() and
+            self.annot_mgr.current_tool in (AnnotationManager.TOOL_MOSAIC, AnnotationManager.TOOL_HIGHLIGHTER, AnnotationManager.TOOL_PEN)):
+            if self.selection_rect.contains(self.hovered_pos):
+                self.setCursor(self._get_tool_circle_cursor(self.annot_mgr.current_tool))
+        self.update()
 
     def _create_circle_cursor(self, diameter: int, color: Optional[QColor] = None) -> QCursor:
         size = max(16, diameter + 6)
@@ -409,14 +417,7 @@ class SnipperWidget(QWidget):
         return QCursor(pixmap, int(center), int(center))
 
     def _get_brush_diameter(self, tool_id: str) -> int:
-        w = self.annot_mgr.current_width
-        if tool_id == AnnotationManager.TOOL_MOSAIC:
-            return 14 if w <= 2 else (26 if w <= 4 else 44)
-        elif tool_id == AnnotationManager.TOOL_HIGHLIGHTER:
-            return 12 if w <= 2 else (18 if w <= 4 else 26)
-        elif tool_id == AnnotationManager.TOOL_PEN:
-            return 6 if w <= 2 else (10 if w <= 4 else 16)
-        return 12
+        return self.annot_mgr.get_brush_diameter(tool_id)
 
     def _get_tool_circle_cursor(self, tool_id: str) -> QCursor:
         diam = self._get_brush_diameter(tool_id)
@@ -627,6 +628,12 @@ class SnipperWidget(QWidget):
             self.drawing_start_pt = pt
             if tool in (AnnotationManager.TOOL_PEN, AnnotationManager.TOOL_HIGHLIGHTER):
                 self.drawing_pen_points = [pt]
+                is_high = (tool == AnnotationManager.TOOL_HIGHLIGHTER)
+                self.current_drawing_shape = PenShape(points=list(self.drawing_pen_points), color=self.annot_mgr.current_color, width=self.annot_mgr.current_width, is_highlighter=is_high)
+            elif tool == AnnotationManager.TOOL_MOSAIC:
+                self.drawing_pen_points = [pt]
+                diam = self._get_brush_diameter(AnnotationManager.TOOL_MOSAIC)
+                self.current_drawing_shape = MosaicShape(points=list(self.drawing_pen_points), brush_width=diam, block_size=10)
             self.update()
             return
 
@@ -709,8 +716,9 @@ class SnipperWidget(QWidget):
                 is_high = (tool == AnnotationManager.TOOL_HIGHLIGHTER)
                 self.current_drawing_shape = PenShape(points=list(self.drawing_pen_points), color=self.annot_mgr.current_color, width=self.annot_mgr.current_width, is_highlighter=is_high)
             elif tool == AnnotationManager.TOOL_MOSAIC:
-                r = QRectF(self.drawing_start_pt, pt).normalized()
-                self.current_drawing_shape = MosaicShape(rect=r, block_size=self._get_brush_diameter(AnnotationManager.TOOL_MOSAIC) // 2)
+                self.drawing_pen_points.append(pt)
+                diam = self._get_brush_diameter(AnnotationManager.TOOL_MOSAIC)
+                self.current_drawing_shape = MosaicShape(points=list(self.drawing_pen_points), brush_width=diam, block_size=10)
 
             self.update()
             return

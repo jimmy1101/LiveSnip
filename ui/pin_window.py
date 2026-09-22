@@ -433,6 +433,12 @@ class PinWindow(QWidget):
             self.drawing_start_pt = pt
             if tool in (AnnotationManager.TOOL_PEN, AnnotationManager.TOOL_HIGHLIGHTER):
                 self.drawing_pen_points = [pt]
+                is_high = (tool == AnnotationManager.TOOL_HIGHLIGHTER)
+                self.current_drawing_shape = PenShape(points=list(self.drawing_pen_points), color=self.annot_mgr.current_color, width=self.annot_mgr.current_width, is_highlighter=is_high)
+            elif tool == AnnotationManager.TOOL_MOSAIC:
+                self.drawing_pen_points = [pt]
+                diam = self.annot_mgr.get_brush_diameter(AnnotationManager.TOOL_MOSAIC)
+                self.current_drawing_shape = MosaicShape(points=list(self.drawing_pen_points), brush_width=diam, block_size=10)
             self.current_mode = self.MODE_ANNOTATING
             self.update()
             return
@@ -477,8 +483,9 @@ class PinWindow(QWidget):
                 is_high = (tool == AnnotationManager.TOOL_HIGHLIGHTER)
                 self.current_drawing_shape = PenShape(points=list(self.drawing_pen_points), color=self.annot_mgr.current_color, width=self.annot_mgr.current_width, is_highlighter=is_high)
             elif tool == AnnotationManager.TOOL_MOSAIC:
-                r = QRectF(self.drawing_start_pt, pt).normalized()
-                self.current_drawing_shape = MosaicShape(rect=r, block_size=12)
+                self.drawing_pen_points.append(pt)
+                diam = self.annot_mgr.get_brush_diameter(AnnotationManager.TOOL_MOSAIC)
+                self.current_drawing_shape = MosaicShape(points=list(self.drawing_pen_points), brush_width=diam, block_size=10)
 
             self.update()
             return
