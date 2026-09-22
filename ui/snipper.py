@@ -912,11 +912,11 @@ class SnipperWidget(QWidget):
             sel = self.selection_rect
             sw, sh = self.width(), self.height()
 
-            # 4 surrounding darkened rectangles
-            painter.fillRect(QRect(0, 0, sw, sel.top()), self.mask_brush)                              # Top
-            painter.fillRect(QRect(0, sel.bottom() + 1, sw, sh - sel.bottom() - 1), self.mask_brush)    # Bottom
-            painter.fillRect(QRect(0, sel.top(), sel.left(), sel.height() + 1), self.mask_brush)        # Left
-            painter.fillRect(QRect(sel.right() + 1, sel.top(), sw - sel.right() - 1, sel.height() + 1), self.mask_brush) # Right
+            # 4 surrounding darkened rectangles (zero overlap, perfectly seamless)
+            painter.fillRect(QRect(0, 0, sw, sel.top()), self.mask_brush)                               # Top
+            painter.fillRect(QRect(0, sel.bottom() + 1, sw, sh - (sel.bottom() + 1)), self.mask_brush)  # Bottom
+            painter.fillRect(QRect(0, sel.top(), sel.left(), sel.height()), self.mask_brush)            # Left
+            painter.fillRect(QRect(sel.right() + 1, sel.top(), sw - (sel.right() + 1), sel.height()), self.mask_brush) # Right
 
             # Draw vector annotations (clipped to inside selection)
             painter.save()
