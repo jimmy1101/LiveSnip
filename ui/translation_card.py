@@ -240,13 +240,37 @@ class TranslationCard(QWidget):
         else:
             super().keyPressEvent(event)
 
+    def _safe_stop_worker(self):
+        if self.trans_worker is not None:
+            try:
+                if self.trans_worker.isRunning():
+                    try:
+                        self.trans_worker.finished_translation.disconnect()
+                    except Exception:
+                        pass
+                    self.trans_worker.requestInterruption()
+                    self.trans_worker.wait(300)
+            except RuntimeError:
+                pass
+            self.trans_worker = None
+
+    def _safe_stop_ocr(self):
+        if self.ocr_worker is not None:
+            try:
+                if self.ocr_worker.isRunning():
+                    try:
+                        self.ocr_worker.finished_ocr.disconnect()
+                    except Exception:
+                        pass
+                    self.ocr_worker.requestInterruption()
+                    self.ocr_worker.wait(300)
+            except RuntimeError:
+                pass
+            self.ocr_worker = None
+
     def closeEvent(self, event):
-        if self.ocr_worker and self.ocr_worker.isRunning():
-            self.ocr_worker.requestInterruption()
-            self.ocr_worker.wait(500)
-        if self.trans_worker and self.trans_worker.isRunning():
-            self.trans_worker.requestInterruption()
-            self.trans_worker.wait(1000)
+        self._safe_stop_ocr()
+        self._safe_stop_worker()
         self.closed.emit()
         super().closeEvent(event)
 
@@ -265,13 +289,10 @@ class TranslationCard(QWidget):
         self.lbl_status.setText("⏳ 正在调用 RapidOCR 识别图像文字...")
         self.lbl_status.show()
 
-        if self.ocr_worker and self.ocr_worker.isRunning():
-            self.ocr_worker.requestInterruption()
-            self.ocr_worker.wait(500)
+        self._safe_stop_ocr()
 
         self.ocr_worker = OcrWorker(pixmap, parent=None)
         self.ocr_worker.finished_ocr.connect(self._on_ocr_finished)
-        self.ocr_worker.finished.connect(self.ocr_worker.deleteLater)
         self.ocr_worker.start()
 
     def start_translate_text(self, text: str, pos: Optional[QPoint] = None):
@@ -305,6 +326,7 @@ class TranslationCard(QWidget):
     # --- Internal Handlers ---
 
     def _on_ocr_finished(self, blocks):
+        self._safe_stop_ocr()
         self.lbl_status.hide()
         if not blocks:
             self.lbl_source_lang.setText("未识别到文字")
@@ -348,13 +370,7 @@ class TranslationCard(QWidget):
         self.lbl_status.show()
         self.lbl_source_lang.setText("检测语种中...")
 
-        if self.trans_worker and self.trans_worker.isRunning():
-            try:
-                self.trans_worker.finished_translation.disconnect()
-            except Exception:
-                pass
-            self.trans_worker.requestInterruption()
-            self.trans_worker.wait(300)
+        self._safe_stop_worker()
 
         self.trans_worker = TranslationWorker(
             text=self.current_raw_text,
@@ -363,10 +379,10 @@ class TranslationCard(QWidget):
             parent=None
         )
         self.trans_worker.finished_translation.connect(self._on_translation_finished)
-        self.trans_worker.finished.connect(self.trans_worker.deleteLater)
         self.trans_worker.start()
 
     def _on_translation_finished(self, result: dict):
+        self._safe_stop_worker()
         self.lbl_status.hide()
         if result.get("success"):
             self.current_translated_text = result.get("translated", "")
@@ -402,13 +418,7 @@ class TranslationCard(QWidget):
             self.lbl_status.setText("🌐 正在重新翻译...")
             self.lbl_status.show()
 
-            if self.trans_worker and self.trans_worker.isRunning():
-                try:
-                    self.trans_worker.finished_translation.disconnect()
-                except Exception:
-                    pass
-                self.trans_worker.requestInterruption()
-                self.trans_worker.wait(300)
+            self._safe_stop_worker()
 
             self.trans_worker = TranslationWorker(
                 text=self.current_raw_text,
@@ -417,7 +427,6 @@ class TranslationCard(QWidget):
                 parent=None
             )
             self.trans_worker.finished_translation.connect(self._on_translation_finished)
-            self.trans_worker.finished.connect(self.trans_worker.deleteLater)
             self.trans_worker.start()
 
     def _copy_translation(self):
