@@ -95,12 +95,44 @@ class OcrWorker(QThread):
             return
 
         try:
+            import cv2
             img_np = qpixmap_to_numpy(self.pixmap)
             if img_np is None or img_np.size == 0 or self.isInterruptionRequested():
                 self.finished_ocr.emit([])
                 return
 
-            result, _ = engine(img_np)
+            orig_h, orig_w = img_np.shape[:2]
+            result = None
+            pad_x, pad_y = 0, 0
+            scale = 1.0
+
+            # 1. If image is narrow/short (e.g. single line banner, small height < 120),
+            # small font and tight borders suppress DBNet detection. Pre-scale and pad directly:
+            if orig_h < 120 or orig_w < 150:
+                scale = 1.5
+                scaled = cv2.resize(img_np, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                pad_val = 32
+                padded = cv2.copyMakeBorder(scaled, pad_val, pad_val, pad_val, pad_val, cv2.BORDER_CONSTANT, value=[30, 30, 30])
+                result, _ = engine(padded)
+                if result:
+                    pad_x, pad_y = pad_val, pad_val
+
+            # 2. For standard images (or if small-image upscale didn't detect):
+            if not result and not self.isInterruptionRequested():
+                result, _ = engine(img_np)
+                scale = 1.0
+                pad_x, pad_y = 0, 0
+
+            # 3. Fallback: if standard image still returned nothing, try with 1.5x scale and padding
+            if not result and not self.isInterruptionRequested():
+                scale = 1.5
+                scaled = cv2.resize(img_np, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                pad_val = 32
+                padded = cv2.copyMakeBorder(scaled, pad_val, pad_val, pad_val, pad_val, cv2.BORDER_CONSTANT, value=[30, 30, 30])
+                result, _ = engine(padded)
+                if result:
+                    pad_x, pad_y = pad_val, pad_val
+
             if not result or self.isInterruptionRequested():
                 self.finished_ocr.emit([])
                 return
@@ -110,15 +142,22 @@ class OcrWorker(QThread):
                 if self.isInterruptionRequested():
                     return
                 # item: [box, text, score]
-                box = item[0]
+                raw_box = item[0]
                 text = item[1]
                 score = float(item[2])
-                
+
+                # Map coordinates back to original image coordinate space
+                box = []
+                for p in raw_box:
+                    ox = max(0.0, min(float(orig_w), (p[0] - pad_x) / scale))
+                    oy = max(0.0, min(float(orig_h), (p[1] - pad_y) / scale))
+                    box.append([ox, oy])
+
                 xs = [p[0] for p in box]
                 ys = [p[1] for p in box]
                 min_x, max_x = min(xs), max(xs)
                 min_y, max_y = min(ys), max(ys)
-                
+
                 rect = QRectF(min_x, min_y, max_x - min_x, max_y - min_y)
                 chars = split_text_into_chars(text, rect)
                 blocks.append(TextBlock(text=text, box=box, rect=rect, confidence=score, chars=chars))
