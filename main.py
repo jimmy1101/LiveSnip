@@ -25,6 +25,7 @@ from core.hotkey import GlobalHotkeyManager
 from core.ocr_engine import get_ocr_engine
 from ui.snipper import SnipperWidget
 from ui.pin_window import PinWindow
+from ui.translation_card import TranslationCard
 
 def create_app_icon() -> QIcon:
     """Dynamically draw a modern Snipaste-style icon."""
@@ -103,9 +104,11 @@ class LiveSnipApp:
         # 1. Pre-instantiate Snipper overlay in memory (Persistent Singleton like Snipaste)
         self.snipper = SnipperWidget()
         self.snipper.snip_done.connect(self.create_pin)
+        self.snipper.translate_requested.connect(self.handle_snip_translate)
         self.snipper.hide()
 
         self.active_pins: List[PinWindow] = []
+        self.active_translation_cards: List[TranslationCard] = []
 
         # Settings persistence (Default: enable_shadow is True)
         self.settings = QSettings("LiveSnip", "Settings")
@@ -220,6 +223,7 @@ class LiveSnipApp:
             return
         pin = PinWindow(pixmap, pos, enable_shadow=self.enable_shadow)
         pin.shadow_toggled.connect(self.set_shadow_enabled)
+        pin.translate_requested.connect(self.handle_text_translate)
         self.active_pins.append(pin)
         pin.destroyed.connect(lambda: self._on_pin_destroyed(pin))
         pin.show()
@@ -227,6 +231,34 @@ class LiveSnipApp:
     def _on_pin_destroyed(self, pin):
         if pin in self.active_pins:
             self.active_pins.remove(pin)
+
+    def handle_snip_translate(self, pixmap: QPixmap, rect: QRect):
+        card = TranslationCard()
+        self.active_translation_cards.append(card)
+        card.pin_requested.connect(self.create_text_pin)
+        card.closed.connect(lambda: self._on_card_closed(card))
+        pos = QPoint(rect.x() + 10, rect.bottom() + 10)
+        card.start_ocr_and_translate(pixmap, pos)
+
+    def handle_text_translate(self, text: str, pos: QPoint):
+        card = TranslationCard()
+        self.active_translation_cards.append(card)
+        card.pin_requested.connect(self.create_text_pin)
+        card.closed.connect(lambda: self._on_card_closed(card))
+        card.start_translate_text(text, pos)
+
+    def create_text_pin(self, text: str):
+        card_pixmap = render_text_to_pixmap(text)
+        screen_geo = QGuiApplication.primaryScreen().geometry()
+        pos = QPoint(
+            screen_geo.center().x() - card_pixmap.width() // 2,
+            screen_geo.center().y() - card_pixmap.height() // 2
+        )
+        self.create_pin(card_pixmap, pos)
+
+    def _on_card_closed(self, card):
+        if card in self.active_translation_cards:
+            self.active_translation_cards.remove(card)
 
     def handle_f3_pin(self):
         clipboard = QApplication.clipboard()
@@ -262,6 +294,9 @@ class LiveSnipApp:
         for pin in list(self.active_pins):
             pin.close()
         self.active_pins.clear()
+        for card in list(self.active_translation_cards):
+            card.close()
+        self.active_translation_cards.clear()
 
     def show_about(self):
         snip_k = self.hotkey_mgr.snip_key_desc
@@ -278,7 +313,8 @@ class LiveSnipApp:
             f"<li><b>【1 / 2】键</b>：对准贴图逆时针/顺时针旋转 90 度</li>"
             f"<li><b>【3 / 4】键</b>：对准贴图水平/垂直镜像翻转</li>"
             f"<li><b>【空格键】</b>：贴图开启/关闭矢量画板标注</li>"
-            f"<li><b>微信同款原地划选文字</b>：直接鼠标左键拖拽选词复制！</li>"
+            f"<li><b>【微信同款原地划选文字】</b>：直接鼠标左键拖拽选词复制！</li>"
+            f"<li><b>【🌐 智能翻译】</b>：截图框选点击工具栏【翻译】，或贴图划词点击【翻译】，全自动识别语种并即时翻译！</li>"
             f"</ul>"
         )
         QMessageBox.information(None, "LiveSnip 操作指南", msg)

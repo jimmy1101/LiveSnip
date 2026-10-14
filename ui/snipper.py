@@ -45,6 +45,7 @@ class UnifiedSnipperToolbar(QWidget):
     """Snipaste-style all-in-one horizontal toolbar with annotations, actions, and palette row."""
     pin_clicked = Signal()
     copy_clicked = Signal()
+    translate_clicked = Signal()
     save_clicked = Signal()
     close_clicked = Signal()
     tool_changed = Signal(str)
@@ -155,6 +156,10 @@ class UnifiedSnipperToolbar(QWidget):
         btn_copy = QPushButton("📋 复制")
         btn_copy.clicked.connect(self.copy_clicked.emit)
         row1.addWidget(btn_copy)
+
+        btn_trans = QPushButton("🌐 翻译")
+        btn_trans.clicked.connect(self.translate_clicked.emit)
+        row1.addWidget(btn_trans)
 
         btn_save = QPushButton("💾 保存")
         btn_save.clicked.connect(self.save_clicked.emit)
@@ -294,6 +299,7 @@ class UnifiedSnipperToolbar(QWidget):
 
 class SnipperWidget(QWidget):
     snip_done = Signal(QPixmap, QPoint)  # Cropped pixmap, global top-left pos
+    translate_requested = Signal(QPixmap, QRect)  # Cropped pixmap, global selection rect
 
     HANDLE_TL = 0
     HANDLE_TC = 1
@@ -367,6 +373,7 @@ class SnipperWidget(QWidget):
         self.toolbar = UnifiedSnipperToolbar(self)
         self.toolbar.pin_clicked.connect(self.confirm_pin)
         self.toolbar.copy_clicked.connect(self.confirm_copy)
+        self.toolbar.translate_clicked.connect(self.confirm_translate)
         self.toolbar.save_clicked.connect(self.confirm_save)
         self.toolbar.close_clicked.connect(self.cancel_snip)
         self.toolbar.tool_changed.connect(self._on_annot_tool_changed)
@@ -1027,6 +1034,15 @@ class SnipperWidget(QWidget):
         if not pixmap.isNull():
             clipboard = QApplication.clipboard()
             clipboard.setPixmap(pixmap)
+        self.toolbar.hide()
+        self.hide()
+
+    def confirm_translate(self):
+        self.safe_release_mouse()
+        pixmap = self.get_cropped_pixmap()
+        if not pixmap.isNull():
+            global_rect = QRect(self.mapToGlobal(self.selection_rect.topLeft()), self.selection_rect.size())
+            self.translate_requested.emit(pixmap, global_rect)
         self.toolbar.hide()
         self.hide()
 

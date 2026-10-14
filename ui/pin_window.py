@@ -11,7 +11,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QWidget, QApplication, QMenu, QFileDialog, QPushButton,
-    QToolTip, QInputDialog
+    QToolTip, QInputDialog, QFrame, QHBoxLayout
 )
 
 from core.ocr_engine import TextBlock, CharInfo, OcrWorker, split_text_into_chars
@@ -26,17 +26,39 @@ GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020
 WS_EX_LAYERED = 0x00080000
 
-class FloatingCopyBubble(QPushButton):
-    """Mini floating button that pops up after text is selected."""
+class FloatingActionBubble(QFrame):
+    """Mini floating action bubble that pops up after text is selected."""
+    copy_clicked = Signal()
+    translate_clicked = Signal()
+
     def __init__(self, parent=None):
-        super().__init__("📋 复制文本", parent)
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 3, 4, 3)
+        layout.setSpacing(4)
+
+        self.btn_copy = QPushButton("📋 复制")
+        self.btn_copy.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_copy.clicked.connect(self.copy_clicked.emit)
+        layout.addWidget(self.btn_copy)
+
+        self.btn_trans = QPushButton("🌐 翻译")
+        self.btn_trans.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_trans.clicked.connect(self.translate_clicked.emit)
+        layout.addWidget(self.btn_trans)
+
         self.setStyleSheet("""
+            QFrame {
+                background-color: #2b2b2b;
+                border: 1px solid #444444;
+                border-radius: 5px;
+            }
             QPushButton {
                 background-color: #0078d4;
                 color: #ffffff;
                 border: none;
-                border-radius: 4px;
-                padding: 4px 10px;
+                border-radius: 3px;
+                padding: 3px 8px;
                 font-family: "Segoe UI", "Microsoft YaHei";
                 font-size: 11px;
                 font-weight: bold;
@@ -48,12 +70,13 @@ class FloatingCopyBubble(QPushButton):
                 background-color: #005a9e;
             }
         """)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.adjustSize()
         self.hide()
 
 class PinWindow(QWidget):
     close_requested = Signal(object)
     shadow_toggled = Signal(bool)
+    translate_requested = Signal(str, QPoint)  # Text to translate, global pos
 
     MODE_NONE = 0
     MODE_DRAG_WINDOW = 1
@@ -114,9 +137,10 @@ class PinWindow(QWidget):
         self.current_mode = self.MODE_NONE
         self.drag_window_offset = QPoint()
 
-        # Mini floating copy bubble
-        self.copy_bubble = FloatingCopyBubble(self)
-        self.copy_bubble.clicked.connect(self.copy_selected_text)
+        # Mini floating action bubble
+        self.copy_bubble = FloatingActionBubble(self)
+        self.copy_bubble.copy_clicked.connect(self.copy_selected_text)
+        self.copy_bubble.translate_clicked.connect(self.translate_selected_text)
 
         # Active worker threads registry to prevent QThread GC while running
         self._active_workers = set()
@@ -654,8 +678,14 @@ class PinWindow(QWidget):
             act_copy_sel = menu.addAction("📋 复制划选文字 (Ctrl+C)")
             act_copy_sel.triggered.connect(self.copy_selected_text)
 
+            act_trans_sel = menu.addAction("🌐 翻译划选文字")
+            act_trans_sel.triggered.connect(self.translate_selected_text)
+
         act_copy_all_text = menu.addAction("📑 提取整图全部文字")
         act_copy_all_text.triggered.connect(self.copy_all_text)
+
+        act_trans_all = menu.addAction("🌐 翻译整图全部文字")
+        act_trans_all.triggered.connect(self.translate_all_text)
 
         menu.addSeparator()
 
@@ -743,6 +773,24 @@ class PinWindow(QWidget):
         full_text = "\n".join(lines)
         QApplication.clipboard().setText(full_text)
         QToolTip.showText(QCursor.pos(), f"已提取整图 {len(lines)} 行文字", self, msecShowTime=1500)
+
+    def translate_selected_text(self):
+        full_text, _ = self.get_selected_text_and_rects()
+        if full_text:
+            self.copy_bubble.hide()
+            global_pos = self.mapToGlobal(self.copy_bubble.pos())
+            self.translate_requested.emit(full_text, global_pos)
+
+    def translate_all_text(self):
+        if not self.text_blocks:
+            QToolTip.showText(QCursor.pos(), "未识别到文字", self)
+            return
+        lines = [b.text.strip() for b in self.text_blocks if b.text.strip()]
+        full_text = "\n".join(lines).strip()
+        if full_text:
+            m = self.shadow_margin
+            global_pos = self.mapToGlobal(QPoint(m, m + self.content_h))
+            self.translate_requested.emit(full_text, global_pos)
 
     def get_baked_pixmap(self) -> QPixmap:
         """Returns the pixmap with secondary annotations baked in."""
