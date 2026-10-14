@@ -982,8 +982,10 @@ class SnipperWidget(QWidget):
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
             self.cancel_snip()
-        elif event.key() == Qt.Key.Key_C:
-            # Global color copy: works anytime under cursor!
+        elif event.matches(QKeySequence.StandardKey.Copy) or (event.key() == Qt.Key.Key_C and (event.modifiers() & Qt.KeyboardModifier.ControlModifier)):
+            self.confirm_copy()
+        elif event.key() == Qt.Key.Key_C and not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            # Global color copy: works anytime under cursor (single 'C' key)!
             img = self.full_image if self.full_image is not None else (self.full_pixmap.toImage() if not self.full_pixmap.isNull() else None)
             if img is not None:
                 pos = self.hovered_pos
@@ -1001,11 +1003,9 @@ class SnipperWidget(QWidget):
         elif event.matches(QKeySequence.StandardKey.Redo):
             self._redo_annot()
         elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_F3):
-            if self.selection_rect.isValid() and self.selection_rect.width() > 10:
-                self.confirm_pin()
-        elif event.matches(QKeySequence.StandardKey.Copy):
-            if self.selection_rect.isValid() and self.selection_rect.width() > 10:
-                self.confirm_copy()
+            if not self.selection_rect.isValid() or self.selection_rect.width() <= 10:
+                self.selection_rect = self.rect()
+            self.confirm_pin()
 
     def get_cropped_pixmap(self) -> QPixmap:
         """Returns the cropped selection with all vector annotations baked in."""
@@ -1021,6 +1021,8 @@ class SnipperWidget(QWidget):
 
     def confirm_pin(self):
         self.safe_release_mouse()
+        if not self.selection_rect.isValid() or self.selection_rect.width() <= 10:
+            self.selection_rect = self.rect()
         pixmap = self.get_cropped_pixmap()
         if not pixmap.isNull():
             global_pos = self.mapToGlobal(self.selection_rect.topLeft())
@@ -1030,6 +1032,8 @@ class SnipperWidget(QWidget):
 
     def confirm_copy(self):
         self.safe_release_mouse()
+        if not self.selection_rect.isValid() or self.selection_rect.width() <= 10:
+            self.selection_rect = self.rect()
         pixmap = self.get_cropped_pixmap()
         if not pixmap.isNull():
             clipboard = QApplication.clipboard()

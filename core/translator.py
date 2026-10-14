@@ -83,8 +83,41 @@ def get_auto_target_lang(source_lang: str) -> str:
         return "en"
     return "zh-CN"
 
-def _translate_via_google(text: str, target_lang: str, source_lang: str = "auto", timeout: int = 8) -> Tuple[str, str]:
-    """Primary translation provider via Google Translate."""
+def _translate_via_youdao(text: str, target_lang: str, timeout: int = 6) -> Tuple[str, str]:
+    """Youdao translation provider (ultra-fast and reliable in mainland China)."""
+    y_map = {
+        "zh-CN": "zh-CHS",
+        "zh-TW": "zh-CHT",
+        "en": "en",
+        "ja": "ja",
+        "ko": "ko",
+        "ru": "ru",
+        "fr": "fr",
+        "de": "de",
+        "es": "es",
+    }
+    to_lang = y_map.get(target_lang, target_lang)
+    url = "https://aidemo.youdao.com/trans"
+    data = urllib.parse.urlencode({"q": text, "from": "Auto", "to": to_lang}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        res = json.loads(resp.read().decode("utf-8"))
+        trans_list = res.get("translation", [])
+        trans = "\n".join(trans_list) if isinstance(trans_list, list) else str(trans_list)
+        l_info = res.get("l", "")
+        src = l_info.split("2")[0] if "2" in l_info else "auto"
+        if src == "zh-CHS":
+            src = "zh-CN"
+        elif src == "zh-CHT":
+            src = "zh-TW"
+        return trans, src
+
+def _translate_via_google(text: str, target_lang: str, source_lang: str = "auto", timeout: int = 6) -> Tuple[str, str]:
+    """Secondary translation provider via Google Translate."""
     q = urllib.parse.quote(text)
     url = f"https://translate.googleapis.com/translate_a/single?client=dict-chrome-ex&sl={source_lang}&tl={target_lang}&dt=t&q={q}"
     req = urllib.request.Request(
@@ -104,7 +137,7 @@ def _translate_via_google(text: str, target_lang: str, source_lang: str = "auto"
         translated = "".join(parts)
         return translated, detected_src
 
-def _translate_via_mymemory(text: str, target_lang: str, source_lang: str = "auto", timeout: int = 8) -> Tuple[str, str]:
+def _translate_via_mymemory(text: str, target_lang: str, source_lang: str = "auto", timeout: int = 6) -> Tuple[str, str]:
     """Fallback translation provider via MyMemory."""
     src = source_lang if source_lang != "auto" else detect_local_language(text)
     tgt = target_lang
@@ -135,25 +168,43 @@ def translate_text(text: str, target_lang: str = "auto", source_lang: str = "aut
     else:
         actual_target = target_lang
 
-    # 1. Try Google primary engine
+    errors = []
+
+    # 1. Try Youdao primary engine (fast & works without VPN)
+    try:
+        translated, detected_src = _translate_via_youdao(clean_text, actual_target)
+        if target_lang == "auto":
+            correct_tgt = get_auto_target_lang(detected_src)
+            if correct_tgt != actual_target:
+                translated, detected_src = _translate_via_youdao(clean_text, correct_tgt)
+                actual_target = correct_tgt
+        if translated:
+            return translated, detected_src, actual_target
+    except Exception as e_youdao:
+        errors.append(f"有道源: {e_youdao}")
+
+    # 2. Try Google engine (fallback)
     try:
         translated, detected_src = _translate_via_google(clean_text, actual_target, source_lang)
         if target_lang == "auto":
-            # If Google detected a different source language that changes our decision
             correct_tgt = get_auto_target_lang(detected_src)
             if correct_tgt != actual_target:
                 translated, detected_src = _translate_via_google(clean_text, correct_tgt, detected_src)
                 actual_target = correct_tgt
-        return translated, detected_src, actual_target
+        if translated:
+            return translated, detected_src, actual_target
     except Exception as e_google:
-        print(f"[Translator] Google provider failed: {e_google}, falling back to MyMemory...")
+        errors.append(f"谷歌源: {e_google}")
 
-    # 2. Try MyMemory fallback engine
+    # 3. Try MyMemory engine (fallback)
     try:
         translated, detected_src = _translate_via_mymemory(clean_text, actual_target, source_lang)
-        return translated, detected_src, actual_target
+        if translated:
+            return translated, detected_src, actual_target
     except Exception as e_mymemory:
-        raise RuntimeError(f"翻译服务连接异常: {e_google}; 备用源异常: {e_mymemory}")
+        errors.append(f"MyMemory源: {e_mymemory}")
+
+    raise RuntimeError(f"翻译服务连接失败 ({'; '.join(errors)})")
 
 class TranslationWorker(QThread):
     finished_translation = Signal(dict)

@@ -2,7 +2,7 @@ import sys
 from typing import Optional
 from PySide6.QtCore import Qt, QPoint, Signal, QRect
 from PySide6.QtGui import (
-    QColor, QGuiApplication, QClipboard
+    QColor, QGuiApplication, QClipboard, QPixmap
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (
 )
 
 from core.translator import (
-    LANGUAGE_MAP, get_language_display_name, TranslationWorker
+    LANGUAGE_MAP, get_language_display_name, TranslationWorker,
+    detect_local_language, get_auto_target_lang
 )
 from core.ocr_engine import OcrWorker
 
@@ -289,6 +290,16 @@ class TranslationCard(QWidget):
             self.lbl_status.show()
             return
 
+        # Pre-detect language and set smart target language
+        detected = detect_local_language(self.current_raw_text)
+        auto_tgt = get_auto_target_lang(detected)
+        self.combo_target.blockSignals(True)
+        for idx in range(self.combo_target.count()):
+            if self.combo_target.itemData(idx) == auto_tgt:
+                self.combo_target.setCurrentIndex(idx)
+                break
+        self.combo_target.blockSignals(False)
+
         self._trigger_translation()
 
     # --- Internal Handlers ---
@@ -309,17 +320,41 @@ class TranslationCard(QWidget):
 
         self.current_raw_text = full_text.strip()
         self.txt_original.setPlainText(self.current_raw_text)
+
+        # Pre-detect language and set smart target language
+        detected = detect_local_language(self.current_raw_text)
+        auto_tgt = get_auto_target_lang(detected)
+        self.combo_target.blockSignals(True)
+        for idx in range(self.combo_target.count()):
+            if self.combo_target.itemData(idx) == auto_tgt:
+                self.combo_target.setCurrentIndex(idx)
+                break
+        self.combo_target.blockSignals(False)
+
         self._trigger_translation()
 
     def _trigger_translation(self):
+        text = self.txt_original.toPlainText().strip()
+        if text:
+            self.current_raw_text = text
+
+        if not self.current_raw_text:
+            self.lbl_status.setText("⚠️ 待翻译内容为空")
+            self.lbl_status.show()
+            return
+
         target_code = self.combo_target.currentData() or "zh-CN"
         self.lbl_status.setText("🌐 正在翻译中...")
         self.lbl_status.show()
         self.lbl_source_lang.setText("检测语种中...")
 
         if self.trans_worker and self.trans_worker.isRunning():
+            try:
+                self.trans_worker.finished_translation.disconnect()
+            except Exception:
+                pass
             self.trans_worker.requestInterruption()
-            self.trans_worker.wait(500)
+            self.trans_worker.wait(300)
 
         self.trans_worker = TranslationWorker(
             text=self.current_raw_text,
@@ -358,19 +393,27 @@ class TranslationCard(QWidget):
 
     def _on_target_lang_changed(self):
         """User manually switched target language -> re-translate."""
+        text = self.txt_original.toPlainText().strip()
+        if text:
+            self.current_raw_text = text
+
         if self.current_raw_text:
             target_code = self.combo_target.currentData() or "zh-CN"
             self.lbl_status.setText("🌐 正在重新翻译...")
             self.lbl_status.show()
 
             if self.trans_worker and self.trans_worker.isRunning():
+                try:
+                    self.trans_worker.finished_translation.disconnect()
+                except Exception:
+                    pass
                 self.trans_worker.requestInterruption()
-                self.trans_worker.wait(500)
+                self.trans_worker.wait(300)
 
             self.trans_worker = TranslationWorker(
                 text=self.current_raw_text,
                 target_lang=target_code,
-                source_lang=self.detected_src_lang if self.detected_src_lang != "auto" else "auto",
+                source_lang="auto",
                 parent=None
             )
             self.trans_worker.finished_translation.connect(self._on_translation_finished)

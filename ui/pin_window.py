@@ -818,10 +818,9 @@ class PinWindow(QWidget):
         m = self.shadow_margin
         cw, ch = self.content_w, self.content_h
 
-        # High-visibility White-Grey Ambient & Directional Shadow
-        # Prominent whitish-grey on dark backgrounds, crisp silver-grey on light backgrounds
-        c_inner = QColor(230, 235, 245, 215)
-        c_mid = QColor(195, 200, 210, 125)
+        # Soft elegant ambient drop shadow
+        c_inner = QColor(220, 225, 235, 80)
+        c_mid = QColor(195, 200, 210, 30)
         c_outer = QColor(180, 185, 195, 0)
 
         # 1. Top
@@ -883,9 +882,9 @@ class PinWindow(QWidget):
         # 2. Base image
         painter.drawPixmap(0, 0, self.content_w, self.content_h, self.original_pixmap)
 
-        # Subtle 1.5px crisp whitish-grey outline around image when shadow is enabled
+        # Soft 1px subtle whitish-grey outline around image when shadow is enabled
         if self.has_shadow:
-            painter.setPen(QPen(QColor(220, 225, 235, 220), 1.5))
+            painter.setPen(QPen(QColor(210, 215, 225, 90), 1.0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(0, 0, self.content_w - 1, self.content_h - 1)
 
