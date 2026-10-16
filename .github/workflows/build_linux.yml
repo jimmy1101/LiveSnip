@@ -8,6 +8,9 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
@@ -62,7 +65,8 @@ jobs:
     - name: Build Kylin / Debian .deb Package
       run: |
         chmod +x build_deb.sh run_kylin.sh install_kylin.sh
-        ./build_deb.sh
+        VERSION_TAG="${{ github.ref_name }}"
+        ./build_deb.sh "${VERSION_TAG:-1.1.1}"
 
     - name: Create Portable Linux Tarball
       run: |
@@ -70,7 +74,9 @@ jobs:
         cp install_kylin.sh dist/LiveSnip/
         cp livesnip.desktop dist/LiveSnip/
         cp app.png dist/LiveSnip/
-        tar -czvf LiveSnip_v1.1.0_Linux_x86_64.tar.gz -C dist LiveSnip
+        VERSION_TAG="${{ github.ref_name }}"
+        ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
+        tar -czvf "LiveSnip_${VERSION_TAG:-v1.1.1}_Linux_${ARCH}.tar.gz" -C dist LiveSnip
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
@@ -78,15 +84,15 @@ jobs:
         name: LiveSnip-Linux-Kylin-Packages
         path: |
           *.deb
-          LiveSnip_v1.1.0_Linux_x86_64.tar.gz
+          LiveSnip_*.tar.gz
 
     - name: Publish to GitHub Release
       if: startsWith(github.ref, 'refs/tags/v')
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         files: |
           *.deb
-          LiveSnip_v1.1.0_Linux_x86_64.tar.gz
+          LiveSnip_*.tar.gz
         draft: false
         prerelease: false
       env:
