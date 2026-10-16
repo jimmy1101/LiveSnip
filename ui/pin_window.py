@@ -1,3 +1,4 @@
+import sys
 import math
 import ctypes
 from typing import List, Set, Optional, Tuple
@@ -21,10 +22,16 @@ from core.annotation import (
 )
 from ui.annotation_bar import AnnotationToolbar
 
-user32 = ctypes.windll.user32
-GWL_EXSTYLE = -20
-WS_EX_TRANSPARENT = 0x00000020
-WS_EX_LAYERED = 0x00080000
+if sys.platform == "win32":
+    try:
+        user32 = ctypes.windll.user32
+        GWL_EXSTYLE = -20
+        WS_EX_TRANSPARENT = 0x00000020
+        WS_EX_LAYERED = 0x00080000
+    except Exception:
+        user32 = None
+else:
+    user32 = None
 
 class FloatingActionBubble(QFrame):
     """Mini floating action bubble that pops up after text is selected."""
@@ -222,13 +229,19 @@ class PinWindow(QWidget):
     def toggle_click_through(self):
         """Toggles mouse click-through (drawing/tracing aid). Press F4 to toggle."""
         self.is_click_through = not self.is_click_through
-        hwnd = int(self.winId())
-        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+        if sys.platform == "win32" and user32 is not None:
+            hwnd = int(self.winId())
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if self.is_click_through:
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT)
+            else:
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style & ~WS_EX_TRANSPARENT)
+        else:
+            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, self.is_click_through)
+
         if self.is_click_through:
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT)
             QToolTip.showText(QCursor.pos(), "已开启鼠标穿透 (描图模式)\n按 F4 恢复正常交互", self, msecShowTime=2500)
         else:
-            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style & ~WS_EX_TRANSPARENT)
             QToolTip.showText(QCursor.pos(), "已恢复正常鼠标交互", self, msecShowTime=1500)
 
     def rotate_90(self, clockwise: bool = True):

@@ -38,3 +38,5 @@ Thumbs.db
 审查报告.md
 *.report.md
 使用说明.txt
+out.txt
+build_deb_tmp/

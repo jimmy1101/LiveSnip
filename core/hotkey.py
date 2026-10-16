@@ -1,61 +1,67 @@
-import ctypes
-from ctypes import wintypes
+import sys
 import time
-from typing import List, Set
+from typing import Set, Optional
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QWidget
 
-WM_HOTKEY = 0x0312
-MOD_NOREPEAT = 0x4000
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+    from PySide6.QtWidgets import QWidget
 
-# Global system hotkeys: F1 for Snipping, F3 for Pinning
-VK_F1 = 0x70
-VK_F3 = 0x72
+    WM_HOTKEY = 0x0312
+    MOD_NOREPEAT = 0x4000
 
-class MSG(ctypes.Structure):
-    _fields_ = [
-        ("hwnd", wintypes.HWND),
-        ("message", wintypes.UINT),
-        ("wParam", wintypes.WPARAM),
-        ("lParam", wintypes.LPARAM),
-        ("time", wintypes.DWORD),
-        ("pt", wintypes.POINT),
-    ]
+    # Global system hotkeys: F1 for Snipping, F3 for Pinning
+    VK_F1 = 0x70
+    VK_F3 = 0x72
 
-user32 = ctypes.windll.user32
+    class MSG(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("message", wintypes.UINT),
+            ("wParam", wintypes.WPARAM),
+            ("lParam", wintypes.LPARAM),
+            ("time", wintypes.DWORD),
+            ("pt", wintypes.POINT),
+        ]
 
-class HotkeyListenerWidget(QWidget):
-    hotkey_triggered = Signal(int)
+    user32 = ctypes.windll.user32
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.registered_ids: Set[int] = set()
+    class HotkeyListenerWidget(QWidget):
+        hotkey_triggered = Signal(int)
 
-    def register_hotkey(self, hotkey_id: int, modifiers: int, vk: int) -> bool:
-        hwnd = int(self.winId())
-        res = user32.RegisterHotKey(hwnd, hotkey_id, modifiers | MOD_NOREPEAT, vk)
-        if res:
-            self.registered_ids.add(hotkey_id)
-            return True
-        return False
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.registered_ids: Set[int] = set()
 
-    def unregister_all(self):
-        hwnd = int(self.winId())
-        for hid in list(self.registered_ids):
-            user32.UnregisterHotKey(hwnd, hid)
-        self.registered_ids.clear()
+        def register_hotkey(self, hotkey_id: int, modifiers: int, vk: int) -> bool:
+            hwnd = int(self.winId())
+            res = user32.RegisterHotKey(hwnd, hotkey_id, modifiers | MOD_NOREPEAT, vk)
+            if res:
+                self.registered_ids.add(hotkey_id)
+                return True
+            return False
 
-    def nativeEvent(self, eventType, message):
-        if eventType == b"windows_generic_MSG":
-            msg = MSG.from_address(int(message))
-            if msg.message == WM_HOTKEY:
-                self.hotkey_triggered.emit(int(msg.wParam))
-                return True, 0
-        return super().nativeEvent(eventType, message)
+        def unregister_all(self):
+            hwnd = int(self.winId())
+            for hid in list(self.registered_ids):
+                user32.UnregisterHotKey(hwnd, hid)
+            self.registered_ids.clear()
 
-    def closeEvent(self, event):
-        self.unregister_all()
-        super().closeEvent(event)
+        def nativeEvent(self, eventType, message):
+            if eventType == b"windows_generic_MSG":
+                msg = MSG.from_address(int(message))
+                if msg.message == WM_HOTKEY:
+                    self.hotkey_triggered.emit(int(msg.wParam))
+                    return True, 0
+            return super().nativeEvent(eventType, message)
+
+        def closeEvent(self, event):
+            self.unregister_all()
+            super().closeEvent(event)
+else:
+    HotkeyListenerWidget = None
+
 
 class GlobalHotkeyManager(QObject):
     snip_requested = Signal()
@@ -66,11 +72,16 @@ class GlobalHotkeyManager(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.listener = HotkeyListenerWidget()
-        self.listener.hotkey_triggered.connect(self._on_hotkey)
         self.snip_key_desc = "未绑定"
         self.pin_key_desc = "未绑定"
         self._last_trigger_time = 0.0
+        self._pynput_listener = None
+
+        if sys.platform == "win32":
+            self.listener = HotkeyListenerWidget()
+            self.listener.hotkey_triggered.connect(self._on_hotkey)
+        else:
+            self.listener = None
 
     def _debounce_trigger(self, signal: Signal):
         now = time.time()
@@ -79,20 +90,54 @@ class GlobalHotkeyManager(QObject):
             signal.emit()
 
     def start(self):
-        if self.listener.register_hotkey(self.HOTKEY_SNIP_F1, 0, VK_F1):
-            self.snip_key_desc = "F1"
-        else:
-            self.snip_key_desc = "未绑定"
+        if sys.platform == "win32":
+            if self.listener.register_hotkey(self.HOTKEY_SNIP_F1, 0, VK_F1):
+                self.snip_key_desc = "F1"
+            else:
+                self.snip_key_desc = "未绑定"
 
-        if self.listener.register_hotkey(self.HOTKEY_PIN_F3, 0, VK_F3):
-            self.pin_key_desc = "F3"
+            if self.listener.register_hotkey(self.HOTKEY_PIN_F3, 0, VK_F3):
+                self.pin_key_desc = "F3"
+            else:
+                self.pin_key_desc = "未绑定"
         else:
-            self.pin_key_desc = "未绑定"
+            # Linux (银河麒麟 Kylin OS / Debian / Ubuntu)
+            try:
+                from pynput import keyboard
+
+                def on_press(key):
+                    try:
+                        if key == keyboard.Key.f1:
+                            self._debounce_trigger(self.snip_requested)
+                        elif key == keyboard.Key.f3:
+                            self._debounce_trigger(self.pin_requested)
+                    except Exception:
+                        pass
+
+                self._pynput_listener = keyboard.Listener(on_press=on_press)
+                self._pynput_listener.daemon = True
+                self._pynput_listener.start()
+                self.snip_key_desc = "F1 (全局)"
+                self.pin_key_desc = "F3 (全局)"
+            except Exception as e:
+                print(f"[Hotkey Engine] Linux pynput listener initialization skipped: {e}")
+                print("[Hotkey Engine] Fallback: You can use System Tray icon to trigger Snip / Pin.")
+                self.snip_key_desc = "托盘点击触发"
+                self.pin_key_desc = "托盘点击触发"
 
         print(f"[Hotkey Engine] Active. Snip: {self.snip_key_desc} | Pin: {self.pin_key_desc}")
 
     def stop(self):
-        self.listener.unregister_all()
+        if sys.platform == "win32":
+            if self.listener:
+                self.listener.unregister_all()
+        else:
+            if self._pynput_listener:
+                try:
+                    self._pynput_listener.stop()
+                except Exception:
+                    pass
+                self._pynput_listener = None
 
     def _on_hotkey(self, hotkey_id: int):
         if hotkey_id == self.HOTKEY_SNIP_F1:

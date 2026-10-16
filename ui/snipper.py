@@ -1,3 +1,4 @@
+import sys
 import ctypes
 from typing import Optional, List
 from PySide6.QtCore import Qt, QRect, QPoint, QPointF, QRectF, Signal
@@ -18,11 +19,21 @@ from core.window_detector import get_window_rect_at_point
 from ui.magnifier import MagnifierHUD, MagnifierOverlayWidget
 from ui.annotation_bar import PALETTE_COLORS, ColorDotButton
 
-user32 = ctypes.windll.user32
-kernel32 = ctypes.windll.kernel32
+if sys.platform == "win32":
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+    except Exception:
+        user32 = None
+        kernel32 = None
+else:
+    user32 = None
+    kernel32 = None
 
 def force_foreground_window(hwnd: int):
     """Force window to foreground by attaching thread input (bypasses Windows foreground lock)."""
+    if not user32 or not kernel32:
+        return
     try:
         fore_hwnd = user32.GetForegroundWindow()
         if fore_hwnd == hwnd:

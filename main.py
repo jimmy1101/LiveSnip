@@ -4,13 +4,14 @@ import ctypes
 import threading
 from typing import List
 
-# Instantly hide any attached console window (SW_HIDE = 0, no command prompt popup)
-try:
-    _console_hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-    if _console_hwnd:
-        ctypes.windll.user32.ShowWindow(_console_hwnd, 0)
-except Exception:
-    pass
+# Instantly hide any attached console window on Windows (SW_HIDE = 0, no command prompt popup)
+if sys.platform == "win32":
+    try:
+        _console_hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if _console_hwnd:
+            ctypes.windll.user32.ShowWindow(_console_hwnd, 0)
+    except Exception:
+        pass
 
 from PySide6.QtCore import Qt, QPoint, QRect, QTimer, QSettings
 from PySide6.QtGui import (
@@ -321,7 +322,7 @@ class LiveSnipApp:
 
     def quit_app(self):
         global _single_instance_mutex
-        if _single_instance_mutex:
+        if _single_instance_mutex and sys.platform == "win32":
             try:
                 ctypes.windll.kernel32.CloseHandle(_single_instance_mutex)
                 _single_instance_mutex = None

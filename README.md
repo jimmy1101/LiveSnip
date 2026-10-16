@@ -12,7 +12,7 @@
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python" alt="Python Version" />
   <img src="https://img.shields.io/badge/GUI-PySide6%20(Qt6)-green?logo=qt" alt="GUI" />
   <img src="https://img.shields.io/badge/OCR-RapidOCR%20(Offline)-orange" alt="OCR" />
-  <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?logo=windows" alt="Platform" />
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20(Kylin%20OS)-blue?logo=linux" alt="Platform" />
   <img src="https://img.shields.io/badge/License-MIT-brightgreen" alt="License" />
 </p>
 
@@ -86,11 +86,22 @@ pip install -r requirements.txt
 ```
 *(主要依赖包括 `PySide6`, `rapidocr_onnxruntime`, `pywin32`, `numpy`)*
 
-### 运行
+### Windows 运行
 ```bash
 python main.py
 ```
 或直接双击运行项目根目录下的 **`run.bat`** / **`启动.vbs`**（静默后台常驻托盘，无黑框）。
+
+### 银河麒麟系统 (Kylin Linux OS) 运行与安装
+* **一键运行（免安装）**：
+  ```bash
+  chmod +x run_kylin.sh && ./run_kylin.sh
+  ```
+* **一键安装至系统开始菜单与托盘**：
+  ```bash
+  sudo ./install_kylin.sh
+  ```
+* 详细配置、全局热键及 DEB 打包说明请参阅：[README_KYLIN.md](README_KYLIN.md)
 
 ---
 

@@ -1,0 +1,17 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LiveSnip
+Name[zh_CN]=LiveSnip 截图贴图
+GenericName=Screenshot & OCR Tool
+GenericName[zh_CN]=截图贴图与OCR工具
+Comment=Modern Snipaste-style screenshot, pin, OCR and instant translation tool
+Comment[zh_CN]=现代轻量级截图、贴图悬浮、划选OCR与智能即时翻译工具（深度适配银河麒麟）
+Exec=/opt/livesnip/run_kylin.sh %F
+Icon=livesnip
+Terminal=false
+StartupNotify=true
+StartupWMClass=LiveSnip
+Categories=Utility;Graphics;Office;
+Keywords=screenshot;pin;ocr;translate;snipaste;截图;贴图;识字;翻译;
+MimeType=image/png;image/jpeg;image/bmp;
