@@ -8,8 +8,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-VERSION="${1:-1.1.1}"
-VERSION="${VERSION#v}"
+RAW_VER="${1:-1.1.1}"
+RAW_VER="${RAW_VER#v}"
+if [[ ! "$RAW_VER" =~ ^[0-9] ]]; then
+    VERSION="1.1.1"
+else
+    VERSION="$RAW_VER"
+fi
 ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
 PKG_NAME="livesnip_${VERSION}_${ARCH}"
 BUILD_ROOT="${SCRIPT_DIR}/build_deb_tmp/${PKG_NAME}"

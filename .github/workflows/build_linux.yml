@@ -66,7 +66,10 @@ jobs:
       run: |
         chmod +x build_deb.sh run_kylin.sh install_kylin.sh
         VERSION_TAG="${{ github.ref_name }}"
-        ./build_deb.sh "${VERSION_TAG:-1.1.1}"
+        if [[ ! "${VERSION_TAG#v}" =~ ^[0-9] ]]; then
+          VERSION_TAG="v1.1.1"
+        fi
+        ./build_deb.sh "$VERSION_TAG"
 
     - name: Create Portable Linux Tarball
       run: |
@@ -75,8 +78,11 @@ jobs:
         cp livesnip.desktop dist/LiveSnip/
         cp app.png dist/LiveSnip/
         VERSION_TAG="${{ github.ref_name }}"
+        if [[ ! "${VERSION_TAG#v}" =~ ^[0-9] ]]; then
+          VERSION_TAG="v1.1.1"
+        fi
         ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
-        tar -czvf "LiveSnip_${VERSION_TAG:-v1.1.1}_Linux_${ARCH}.tar.gz" -C dist LiveSnip
+        tar -czvf "LiveSnip_${VERSION_TAG}_Linux_${ARCH}.tar.gz" -C dist LiveSnip
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
