@@ -8,7 +8,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QPixmap, QCursor,
     QFont, QAction, QKeySequence, QTransform,
-    QLinearGradient, QRadialGradient
+    QLinearGradient, QRadialGradient, QGuiApplication
 )
 from PySide6.QtWidgets import (
     QWidget, QApplication, QMenu, QFileDialog, QPushButton,
@@ -138,6 +138,7 @@ class PinWindow(QWidget):
         self.annot_bar.width_changed.connect(lambda w: setattr(self.annot_mgr, "current_width", w))
         self.annot_bar.undo_clicked.connect(self._undo_annot)
         self.annot_bar.redo_clicked.connect(self._redo_annot)
+        self.annot_bar.size_changed.connect(self._position_annot_bar)
         self.annot_bar.hide()
 
         # Interaction state
@@ -255,6 +256,8 @@ class PinWindow(QWidget):
         self.sel_active = None
         self.annot_mgr.clear()
         self._start_ocr()
+        if self.is_annot_mode:
+            self._position_annot_bar()
         self.update()
 
     def flip(self, horizontal: bool = True):
@@ -265,6 +268,8 @@ class PinWindow(QWidget):
         self.sel_active = None
         self.annot_mgr.clear()
         self._start_ocr()
+        if self.is_annot_mode:
+            self._position_annot_bar()
         self.update()
 
     def toggle_annotation_mode(self):
@@ -272,6 +277,7 @@ class PinWindow(QWidget):
         self.is_annot_mode = not self.is_annot_mode
         if self.is_annot_mode:
             self.annot_bar.show()
+            self.annot_bar.raise_()
             self._position_annot_bar()
             self.setCursor(Qt.CursorShape.CrossCursor)
         else:
@@ -281,11 +287,45 @@ class PinWindow(QWidget):
         self.update()
 
     def _position_annot_bar(self):
-        m = self.shadow_margin
+        if not hasattr(self, "annot_bar") or not self.is_annot_mode:
+            return
+
+        self.annot_bar.adjustSize()
         ab_size = self.annot_bar.sizeHint()
-        x = m + max(5, (self.content_w - ab_size.width()) // 2)
-        y = m + max(5, self.content_h - ab_size.height() - 8)
-        self.annot_bar.move(x, y)
+        ab_w = ab_size.width()
+        ab_h = ab_size.height()
+
+        m = self.shadow_margin
+        # 贴图图像左上角的全局屏幕坐标
+        img_global_pos = self.mapToGlobal(QPoint(m, m))
+        img_left = img_global_pos.x()
+        img_top = img_global_pos.y()
+        img_bottom = img_top + self.content_h
+        img_center_x = img_left + self.content_w // 2
+
+        # 默认放置在贴图正下方，水平居中对齐
+        target_x = img_center_x - ab_w // 2
+        # annot_bar 自带 6px 的外层阴影边距，y 轴设为 img_bottom + 2 使视觉间距正好为 8px
+        target_y = img_bottom + 2
+
+        # 获取贴图所在的屏幕工作区
+        screen = QGuiApplication.screenAt(QPoint(img_center_x, img_bottom))
+        if not screen:
+            screen = self.screen() or QGuiApplication.primaryScreen()
+
+        if screen:
+            avail = screen.availableGeometry()
+            # 如果贴图正下方空间不足以完整展示菜单，自动翻转到贴图正上方
+            if target_y + ab_h > avail.bottom():
+                alt_y = img_top - ab_h - 2
+                if alt_y >= avail.top() or (img_top - avail.top() > avail.bottom() - img_bottom):
+                    target_y = alt_y
+
+            # 约束在屏幕有效显示范围内，防止被截断
+            target_x = max(avail.left() + 4, min(target_x, avail.right() - ab_w - 4))
+            target_y = max(avail.top() + 4, min(target_y, avail.bottom() - ab_h - 4))
+
+        self.annot_bar.move(target_x, target_y)
 
     def _on_annot_tool_changed(self, tool_id: str):
         self.annot_mgr.current_tool = tool_id
@@ -745,7 +785,31 @@ class PinWindow(QWidget):
 
         menu.exec(event.globalPos())
 
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        if getattr(self, "is_annot_mode", False) and hasattr(self, "annot_bar") and not self.annot_bar.isHidden():
+            self._position_annot_bar()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if getattr(self, "is_annot_mode", False) and hasattr(self, "annot_bar") and not self.annot_bar.isHidden():
+            self._position_annot_bar()
+
+    def hideEvent(self, event):
+        if hasattr(self, "annot_bar"):
+            self.annot_bar.hide()
+        super().hideEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if getattr(self, "is_annot_mode", False) and hasattr(self, "annot_bar"):
+            self.annot_bar.show()
+            self.annot_bar.raise_()
+            self._position_annot_bar()
+
     def closeEvent(self, event):
+        if hasattr(self, "annot_bar"):
+            self.annot_bar.close()
         workers = []
         if hasattr(self, "ocr_worker") and self.ocr_worker is not None:
             workers.append(self.ocr_worker)

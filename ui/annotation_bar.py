@@ -1,9 +1,9 @@
 from typing import Optional
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, Signal, QSize, QPoint
 from PySide6.QtGui import QColor, QPainter, QBrush, QPen, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QButtonGroup,
-    QFrame
+    QFrame, QGraphicsDropShadowEffect
 )
 
 PALETTE_COLORS = [
@@ -46,12 +46,26 @@ class AnnotationToolbar(QWidget):
     width_changed = Signal(int)
     undo_clicked = Signal()
     redo_clicked = Signal()
+    size_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setStyleSheet("""
-            QWidget {
+        self.setWindowFlags(
+            Qt.WindowType.Tool |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._drag_pos: Optional[QPoint] = None
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(6, 6, 6, 6)
+        outer_layout.setSpacing(0)
+
+        self.container = QFrame(self)
+        self.container.setObjectName("bar_container")
+        self.container.setStyleSheet("""
+            QFrame#bar_container {
                 background-color: #242424;
                 border: 1px solid #3d3d3d;
                 border-radius: 6px;
@@ -61,7 +75,7 @@ class AnnotationToolbar(QWidget):
                 color: #d0d0d0;
                 font-family: "Segoe UI", "Microsoft YaHei";
                 font-size: 12px;
-                padding: 3px 7px;
+                padding: 4px 8px;
                 border: 1px solid transparent;
                 border-radius: 4px;
             }
@@ -82,7 +96,15 @@ class AnnotationToolbar(QWidget):
             }
         """)
 
-        main_layout = QVBoxLayout(self)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(12)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        shadow.setOffset(0, 3)
+        self.container.setGraphicsEffect(shadow)
+
+        outer_layout.addWidget(self.container)
+
+        main_layout = QVBoxLayout(self.container)
         main_layout.setContentsMargins(6, 4, 6, 4)
         main_layout.setSpacing(4)
 
@@ -133,7 +155,7 @@ class AnnotationToolbar(QWidget):
         main_layout.addLayout(row1)
 
         # Row 2: Secondary options (Palette & Stroke Width)
-        self.options_widget = QWidget(self)
+        self.options_widget = QWidget(self.container)
         row2 = QHBoxLayout(self.options_widget)
         row2.setContentsMargins(2, 2, 2, 2)
         row2.setSpacing(6)
@@ -167,6 +189,20 @@ class AnnotationToolbar(QWidget):
         row2.addStretch()
         main_layout.addWidget(self.options_widget)
         self.options_widget.hide()  # hidden until an annotation tool is active
+        self.adjustSize()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.pos()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if getattr(self, "_drag_pos", None) is not None and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
 
     def _on_tool_clicked(self, tool_id: str, checked: bool):
         for tid, btn in self.tool_buttons.items():
@@ -180,3 +216,5 @@ class AnnotationToolbar(QWidget):
             self.options_widget.hide()
             self.tool_changed.emit("none")
         self.adjustSize()
+        self.size_changed.emit()
+
