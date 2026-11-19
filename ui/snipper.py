@@ -363,7 +363,7 @@ class SnipperWidget(QWidget):
         # Magnifier Overlay & Window detector
         self.magnifier_overlay = MagnifierOverlayWidget(self)
         self.magnifier_overlay.setGeometry(self.rect())
-        self.magnifier_overlay.show()
+        self.magnifier_overlay.hide()
         self.hovered_window_rect: Optional[QRect] = None
 
         # Text editing state (movable & scalable text)
@@ -460,14 +460,34 @@ class SnipperWidget(QWidget):
         if self.annot_mgr.redo():
             self.update()
 
+    def _hide_overlay_and_tools(self):
+        """Completely hide snipper window, magnifier overlay, and toolbar with clean state reset."""
+        self.safe_release_mouse()
+        if hasattr(self, "magnifier_overlay"):
+            self.magnifier_overlay.update_cursor(QPoint(-1000, -1000), None, is_active=False)
+            self.magnifier_overlay.hide()
+        if hasattr(self, "toolbar"):
+            self.toolbar.reset_tools()
+            self.toolbar.hide()
+        self.hide()
+
     def prepare_and_show(self):
         """Called when hotkey is triggered. 100% crystal-clear transparent without darkening."""
+        # 1. 彻底防自身重入截屏：如果当前已在截图界面，先将自身与放大镜彻底隐匿并刷新 DWM
+        if self.isVisible():
+            self._hide_overlay_and_tools()
+            QApplication.processEvents()
+            import time
+            time.sleep(0.04)
+            QApplication.processEvents()
+
+        # 2. 抓取干净真实的桌面像素
         screen = QGuiApplication.primaryScreen()
         self.full_pixmap = screen.grabWindow(0)
         self.full_image = self.full_pixmap.toImage()
         self.setGeometry(screen.geometry())
 
-        # Reset all states
+        # 3. Reset all states
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.selection_rect = QRect()
         self.is_mouse_down = False
@@ -481,12 +501,13 @@ class SnipperWidget(QWidget):
         self.toolbar.reset_tools()
         self.toolbar.hide()
 
-        # Magnifier overlay
+        # 4. Magnifier overlay ready with fresh desktop image and current cursor
         self.magnifier_overlay.setGeometry(self.rect())
+        self.magnifier_overlay.update_cursor(self.hovered_pos, self.full_image, is_active=True)
         self.magnifier_overlay.show()
         self.magnifier_overlay.raise_()
 
-        # Instant show & native focus takeover
+        # 5. Instant show & native focus takeover
         self.show()
         self.raise_()
         self.activateWindow()
@@ -498,10 +519,7 @@ class SnipperWidget(QWidget):
             self.releaseMouse()
 
     def cancel_snip(self):
-        self.safe_release_mouse()
-        self.magnifier_overlay.hide()
-        self.toolbar.hide()
-        self.hide()
+        self._hide_overlay_and_tools()
 
     # --- 8-Handle Resizing & Move Detection ---
 
@@ -1031,46 +1049,38 @@ class SnipperWidget(QWidget):
         return QPixmap()
 
     def confirm_pin(self):
-        self.safe_release_mouse()
         if not self.selection_rect.isValid() or self.selection_rect.width() <= 10:
             self.selection_rect = self.rect()
         pixmap = self.get_cropped_pixmap()
         if not pixmap.isNull():
             global_pos = self.mapToGlobal(self.selection_rect.topLeft())
             self.snip_done.emit(pixmap, global_pos)
-        self.toolbar.hide()
-        self.hide()
+        self._hide_overlay_and_tools()
 
     def confirm_copy(self):
-        self.safe_release_mouse()
         if not self.selection_rect.isValid() or self.selection_rect.width() <= 10:
             self.selection_rect = self.rect()
         pixmap = self.get_cropped_pixmap()
         if not pixmap.isNull():
             clipboard = QApplication.clipboard()
             clipboard.setPixmap(pixmap)
-        self.toolbar.hide()
-        self.hide()
+        self._hide_overlay_and_tools()
 
     def confirm_translate(self):
-        self.safe_release_mouse()
         pixmap = self.get_cropped_pixmap()
         if not pixmap.isNull():
             global_rect = QRect(self.mapToGlobal(self.selection_rect.topLeft()), self.selection_rect.size())
             self.translate_requested.emit(pixmap, global_rect)
-        self.toolbar.hide()
-        self.hide()
+        self._hide_overlay_and_tools()
 
     def confirm_save(self):
-        self.safe_release_mouse()
         pixmap = self.get_cropped_pixmap()
         if not pixmap.isNull():
             path, _ = QFileDialog.getSaveFileName(self, "保存截图", "", "Images (*.png *.jpg *.bmp)")
             if path:
                 pixmap.save(path)
-        self.toolbar.hide()
-        self.hide()
+        self._hide_overlay_and_tools()
 
     def hideEvent(self, event):
-        self.safe_release_mouse()
+        self._hide_overlay_and_tools()
         super().hideEvent(event)
