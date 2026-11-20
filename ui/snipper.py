@@ -487,32 +487,47 @@ class SnipperWidget(QWidget):
         self.full_image = self.full_pixmap.toImage()
         self.setGeometry(screen.geometry())
 
-        # 3. Reset all states
+        # 3. 立即获取当前鼠标的物理全局坐标与本地坐标
+        global_cursor_pos = QCursor.pos()
+        local_pos = self.mapFromGlobal(global_cursor_pos)
+        self.hovered_pos = local_pos
+
+        # 4. 立即主动探测当前光标所在的窗口矩形，确保首帧直接展示蓝色吸附高亮
+        detected = get_window_rect_at_point(global_cursor_pos)
+        if detected:
+            local_tl = self.mapFromGlobal(detected.topLeft())
+            self.hovered_window_rect = QRect(local_tl, detected.size())
+        else:
+            self.hovered_window_rect = None
+
+        # 5. Reset other states
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.selection_rect = QRect()
         self.is_mouse_down = False
         self.has_dragged = False
         self.active_handle = self.HANDLE_NONE
-        self.hovered_window_rect = None
-        self.hovered_pos = QCursor.pos()
         self.selected_text_shape = None
         self.text_drag_mode = "none"
         self.annot_mgr.clear()
         self.toolbar.reset_tools()
         self.toolbar.hide()
 
-        # 4. Magnifier overlay ready with fresh desktop image and current cursor
-        self.magnifier_overlay.setGeometry(self.rect())
-        self.magnifier_overlay.update_cursor(self.hovered_pos, self.full_image, is_active=True)
-        self.magnifier_overlay.show()
-        self.magnifier_overlay.raise_()
-
-        # 5. Instant show & native focus takeover
+        # 6. 全屏截屏窗口显式置顶呈现
         self.show()
         self.raise_()
         self.activateWindow()
         force_foreground_window(int(self.winId()))
         self.update()
+
+        # 7. 立即激活并同步放大镜覆盖层，强制触发首帧渲染
+        self.magnifier_overlay.setGeometry(self.rect())
+        self.magnifier_overlay.update_cursor(self.hovered_pos, self.full_image, is_active=True)
+        self.magnifier_overlay.show()
+        self.magnifier_overlay.raise_()
+        self.magnifier_overlay.update()
+
+        # 8. 冲刷事件队列，确保首帧画面立即渲染到屏幕，无需等待后续鼠标移动
+        QApplication.processEvents()
 
     def safe_release_mouse(self):
         if self.mouseGrabber() == self:
@@ -814,9 +829,15 @@ class SnipperWidget(QWidget):
             else:
                 # Detect window under mouse for snapping (picking color mode)
                 self.setCursor(Qt.CursorShape.ArrowCursor)
-                detected = get_window_rect_at_point(pos)
-                if detected != self.hovered_window_rect:
-                    self.hovered_window_rect = detected
+                global_pt = self.mapToGlobal(pos)
+                detected = get_window_rect_at_point(global_pt)
+                if detected:
+                    local_tl = self.mapFromGlobal(detected.topLeft())
+                    snap_rect = QRect(local_tl, detected.size())
+                else:
+                    snap_rect = None
+                if snap_rect != self.hovered_window_rect:
+                    self.hovered_window_rect = snap_rect
 
             self._update_magnifier(pos)
             self.update()
