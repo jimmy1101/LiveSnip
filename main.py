@@ -2,7 +2,35 @@ import sys
 import os
 import ctypes
 import threading
+import faulthandler
+import traceback
+import datetime
 from typing import List
+
+# Crash diagnostics & fault handling
+def _init_crash_logging():
+    try:
+        log_dir = os.path.join(os.path.expanduser("~"), ".livesnip")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, "crash_dump.log")
+        crash_f = open(log_file, "a", encoding="utf-8")
+        faulthandler.enable(file=crash_f, all_threads=True)
+
+        def excepthook(exc_type, exc_value, exc_traceback):
+            try:
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                err_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+                crash_f.write(f"\n[{now_str}] Uncaught Exception:\n{err_msg}\n")
+                crash_f.flush()
+            except Exception:
+                pass
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+        sys.excepthook = excepthook
+    except Exception:
+        pass
+
+_init_crash_logging()
 
 # Instantly hide any attached console window on Windows (SW_HIDE = 0, no command prompt popup)
 if sys.platform == "win32":
@@ -225,11 +253,11 @@ class LiveSnipApp:
         pin = PinWindow(pixmap, pos, enable_shadow=self.enable_shadow)
         pin.shadow_toggled.connect(self.set_shadow_enabled)
         pin.translate_requested.connect(self.handle_text_translate)
+        pin.closed.connect(self._on_pin_closed)
         self.active_pins.append(pin)
-        pin.destroyed.connect(lambda: self._on_pin_destroyed(pin))
         pin.show()
 
-    def _on_pin_destroyed(self, pin):
+    def _on_pin_closed(self, pin):
         if pin in self.active_pins:
             self.active_pins.remove(pin)
 
@@ -237,7 +265,7 @@ class LiveSnipApp:
         card = TranslationCard()
         self.active_translation_cards.append(card)
         card.pin_requested.connect(self.create_text_pin)
-        card.closed.connect(lambda: self._on_card_closed(card))
+        card.closed.connect(self._on_card_closed)
         pos = QPoint(rect.x() + 10, rect.bottom() + 10)
         card.start_ocr_and_translate(pixmap, pos)
 
@@ -245,7 +273,7 @@ class LiveSnipApp:
         card = TranslationCard()
         self.active_translation_cards.append(card)
         card.pin_requested.connect(self.create_text_pin)
-        card.closed.connect(lambda: self._on_card_closed(card))
+        card.closed.connect(self._on_card_closed)
         card.start_translate_text(text, pos)
 
     def create_text_pin(self, text: str):

@@ -81,6 +81,7 @@ class FloatingActionBubble(QFrame):
         self.hide()
 
 class PinWindow(QWidget):
+    closed = Signal(object)
     close_requested = Signal(object)
     shadow_toggled = Signal(bool)
     translate_requested = Signal(str, QPoint)  # Text to translate, global pos
@@ -107,7 +108,7 @@ class PinWindow(QWidget):
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.Tool
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
         m = self.shadow_margin
@@ -150,35 +151,24 @@ class PinWindow(QWidget):
         self.copy_bubble.copy_clicked.connect(self.copy_selected_text)
         self.copy_bubble.translate_clicked.connect(self.translate_selected_text)
 
-        # Active worker threads registry to prevent QThread GC while running
-        self._active_workers = set()
+        # OCR worker reference
+        self.ocr_worker: Optional[OcrWorker] = None
 
         # Launch OCR in background
         self._start_ocr()
 
+    def _stop_ocr_worker(self):
+        worker = getattr(self, "ocr_worker", None)
+        if worker is not None:
+            self.ocr_worker = None
+            worker.safe_stop()
+
     def _start_ocr(self):
         self.is_ocr_running = True
-        if hasattr(self, "_active_workers"):
-            self._active_workers = {w for w in self._active_workers if w.isRunning()}
-        else:
-            self._active_workers = set()
-
-        if hasattr(self, "ocr_worker") and self.ocr_worker is not None:
-            if self.ocr_worker.isRunning():
-                self.ocr_worker.requestInterruption()
-                import warnings
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", RuntimeWarning)
-                    try:
-                        self.ocr_worker.finished_ocr.disconnect()
-                    except Exception:
-                        pass
-                self._active_workers.add(self.ocr_worker)
+        self._stop_ocr_worker()
 
         self.ocr_worker = OcrWorker(self.original_pixmap, parent=None)
         self.ocr_worker.finished_ocr.connect(self._on_ocr_finished)
-        self.ocr_worker.finished.connect(self.ocr_worker.deleteLater)
-        self._active_workers.add(self.ocr_worker)
         self.ocr_worker.start()
 
     def _on_ocr_finished(self, blocks: List[TextBlock]):
@@ -808,25 +798,16 @@ class PinWindow(QWidget):
             self._position_annot_bar()
 
     def closeEvent(self, event):
-        if hasattr(self, "annot_bar"):
-            self.annot_bar.close()
-        workers = []
-        if hasattr(self, "ocr_worker") and self.ocr_worker is not None:
-            workers.append(self.ocr_worker)
-        if hasattr(self, "_active_workers"):
-            workers.extend(self._active_workers)
-
-        for w in set(workers):
-            if w.isRunning():
-                w.requestInterruption()
-                import warnings
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", RuntimeWarning)
-                    try:
-                        w.finished_ocr.disconnect()
-                    except Exception:
-                        pass
-                w.wait(500)
+        try:
+            self.closed.emit(self)
+        except Exception:
+            pass
+        if hasattr(self, "annot_bar") and self.annot_bar is not None:
+            try:
+                self.annot_bar.close()
+            except Exception:
+                pass
+        self._stop_ocr_worker()
         super().closeEvent(event)
 
     # --- Actions ---

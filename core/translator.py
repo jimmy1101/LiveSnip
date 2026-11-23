@@ -223,6 +223,8 @@ def translate_text(text: str, target_lang: str = "auto", source_lang: str = "aut
 
     raise RuntimeError(f"翻译服务连接失败 ({'; '.join(errors)})")
 
+_running_translation_workers = set()
+
 class TranslationWorker(QThread):
     finished_translation = Signal(dict)
 
@@ -231,6 +233,22 @@ class TranslationWorker(QThread):
         self.text = text.strip()
         self.target_lang = target_lang
         self.source_lang = source_lang
+        _running_translation_workers.add(self)
+        self.finished.connect(self._on_finished)
+
+    def _on_finished(self):
+        _running_translation_workers.discard(self)
+
+    def safe_stop(self):
+        try:
+            if self.isRunning():
+                self.requestInterruption()
+                try:
+                    self.finished_translation.disconnect()
+                except Exception:
+                    pass
+        except RuntimeError:
+            pass
 
     def run(self):
         if not self.text:

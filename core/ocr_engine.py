@@ -1,8 +1,12 @@
+import threading
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Optional
 from PySide6.QtCore import QThread, Signal, QRectF
 from PySide6.QtGui import QImage, QPixmap
+
+_ocr_lock = threading.Lock()
+_running_ocr_workers = set()
 
 @dataclass
 class CharInfo:
@@ -87,6 +91,22 @@ class OcrWorker(QThread):
     def __init__(self, pixmap: QPixmap, parent=None):
         super().__init__(parent)
         self.pixmap = pixmap
+        _running_ocr_workers.add(self)
+        self.finished.connect(self._on_finished)
+
+    def _on_finished(self):
+        _running_ocr_workers.discard(self)
+
+    def safe_stop(self):
+        try:
+            if self.isRunning():
+                self.requestInterruption()
+                try:
+                    self.finished_ocr.disconnect()
+                except Exception:
+                    pass
+        except RuntimeError:
+            pass
 
     def run(self):
         engine = get_ocr_engine()
@@ -94,81 +114,86 @@ class OcrWorker(QThread):
             self.finished_ocr.emit([])
             return
 
-        try:
-            import cv2
-            img_np = qpixmap_to_numpy(self.pixmap)
-            if img_np is None or img_np.size == 0 or self.isInterruptionRequested():
+        with _ocr_lock:
+            if self.isInterruptionRequested():
                 self.finished_ocr.emit([])
                 return
 
-            orig_h, orig_w = img_np.shape[:2]
-            result = None
-            pad_x, pad_y = 0, 0
-            scale = 1.0
+            try:
+                import cv2
+                img_np = qpixmap_to_numpy(self.pixmap)
+                if img_np is None or img_np.size == 0 or self.isInterruptionRequested():
+                    self.finished_ocr.emit([])
+                    return
 
-            # 1. If image is narrow/short (e.g. single line banner, small height < 120),
-            # small font and tight borders suppress DBNet detection. Pre-scale and pad directly:
-            if orig_h < 120 or orig_w < 150:
-                scale = 1.5
-                scaled = cv2.resize(img_np, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-                pad_val = 32
-                padded = cv2.copyMakeBorder(scaled, pad_val, pad_val, pad_val, pad_val, cv2.BORDER_CONSTANT, value=[30, 30, 30])
-                result, _ = engine(padded)
-                if result:
-                    pad_x, pad_y = pad_val, pad_val
-
-            # 2. For standard images (or if small-image upscale didn't detect):
-            if not result and not self.isInterruptionRequested():
-                result, _ = engine(img_np)
-                scale = 1.0
+                orig_h, orig_w = img_np.shape[:2]
+                result = None
                 pad_x, pad_y = 0, 0
+                scale = 1.0
 
-            # 3. Fallback: if standard image still returned nothing, try with 1.5x scale and padding
-            if not result and not self.isInterruptionRequested():
-                scale = 1.5
-                scaled = cv2.resize(img_np, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-                pad_val = 32
-                padded = cv2.copyMakeBorder(scaled, pad_val, pad_val, pad_val, pad_val, cv2.BORDER_CONSTANT, value=[30, 30, 30])
-                result, _ = engine(padded)
-                if result:
-                    pad_x, pad_y = pad_val, pad_val
+                # 1. If image is narrow/short (e.g. single line banner, small height < 120),
+                # small font and tight borders suppress DBNet detection. Pre-scale and pad directly:
+                if orig_h < 120 or orig_w < 150:
+                    scale = 1.5
+                    scaled = cv2.resize(img_np, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                    pad_val = 32
+                    padded = cv2.copyMakeBorder(scaled, pad_val, pad_val, pad_val, pad_val, cv2.BORDER_CONSTANT, value=[30, 30, 30])
+                    result, _ = engine(padded)
+                    if result:
+                        pad_x, pad_y = pad_val, pad_val
 
-            if not result or self.isInterruptionRequested():
-                self.finished_ocr.emit([])
-                return
+                # 2. For standard images (or if small-image upscale didn't detect):
+                if not result and not self.isInterruptionRequested():
+                    result, _ = engine(img_np)
+                    scale = 1.0
+                    pad_x, pad_y = 0, 0
 
-            blocks = []
-            for item in result:
+                # 3. Fallback: if standard image still returned nothing, try with 1.5x scale and padding
+                if not result and not self.isInterruptionRequested():
+                    scale = 1.5
+                    scaled = cv2.resize(img_np, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                    pad_val = 32
+                    padded = cv2.copyMakeBorder(scaled, pad_val, pad_val, pad_val, pad_val, cv2.BORDER_CONSTANT, value=[30, 30, 30])
+                    result, _ = engine(padded)
+                    if result:
+                        pad_x, pad_y = pad_val, pad_val
+
+                if not result or self.isInterruptionRequested():
+                    self.finished_ocr.emit([])
+                    return
+
+                blocks = []
+                for item in result:
+                    if self.isInterruptionRequested():
+                        return
+                    # item: [box, text, score]
+                    raw_box = item[0]
+                    text = item[1]
+                    score = float(item[2])
+
+                    # Map coordinates back to original image coordinate space
+                    box = []
+                    for p in raw_box:
+                        ox = max(0.0, min(float(orig_w), (p[0] - pad_x) / scale))
+                        oy = max(0.0, min(float(orig_h), (p[1] - pad_y) / scale))
+                        box.append([ox, oy])
+
+                    xs = [p[0] for p in box]
+                    ys = [p[1] for p in box]
+                    min_x, max_x = min(xs), max(xs)
+                    min_y, max_y = min(ys), max(ys)
+
+                    rect = QRectF(min_x, min_y, max_x - min_x, max_y - min_y)
+                    chars = split_text_into_chars(text, rect)
+                    blocks.append(TextBlock(text=text, box=box, rect=rect, confidence=score, chars=chars))
+
                 if self.isInterruptionRequested():
                     return
-                # item: [box, text, score]
-                raw_box = item[0]
-                text = item[1]
-                score = float(item[2])
 
-                # Map coordinates back to original image coordinate space
-                box = []
-                for p in raw_box:
-                    ox = max(0.0, min(float(orig_w), (p[0] - pad_x) / scale))
-                    oy = max(0.0, min(float(orig_h), (p[1] - pad_y) / scale))
-                    box.append([ox, oy])
-
-                xs = [p[0] for p in box]
-                ys = [p[1] for p in box]
-                min_x, max_x = min(xs), max(xs)
-                min_y, max_y = min(ys), max(ys)
-
-                rect = QRectF(min_x, min_y, max_x - min_x, max_y - min_y)
-                chars = split_text_into_chars(text, rect)
-                blocks.append(TextBlock(text=text, box=box, rect=rect, confidence=score, chars=chars))
-
-            if self.isInterruptionRequested():
-                return
-
-            # Sort blocks top-to-bottom, left-to-right
-            blocks.sort(key=lambda b: (round(b.rect.y() / 15) * 15, b.rect.x()))
-            self.finished_ocr.emit(blocks)
-        except Exception as e:
-            if not self.isInterruptionRequested():
-                print(f"[OCR] Error during recognition: {e}")
-            self.finished_ocr.emit([])
+                # Sort blocks top-to-bottom, left-to-right
+                blocks.sort(key=lambda b: (round(b.rect.y() / 15) * 15, b.rect.x()))
+                self.finished_ocr.emit(blocks)
+            except Exception as e:
+                if not self.isInterruptionRequested():
+                    print(f"[OCR] Error during recognition: {e}")
+                self.finished_ocr.emit([])

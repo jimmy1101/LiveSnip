@@ -49,11 +49,16 @@ if sys.platform == "win32":
             self.registered_ids.clear()
 
         def nativeEvent(self, eventType, message):
-            if eventType == b"windows_generic_MSG":
-                msg = MSG.from_address(int(message))
-                if msg.message == WM_HOTKEY:
-                    self.hotkey_triggered.emit(int(msg.wParam))
-                    return True, 0
+            try:
+                if eventType == b"windows_generic_MSG" and message:
+                    addr = int(message)
+                    if addr != 0:
+                        msg = MSG.from_address(addr)
+                        if msg.message == WM_HOTKEY:
+                            self.hotkey_triggered.emit(int(msg.wParam))
+                            return True, 0
+            except Exception:
+                pass
             return super().nativeEvent(eventType, message)
 
         def closeEvent(self, event):

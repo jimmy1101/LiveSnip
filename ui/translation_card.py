@@ -20,7 +20,7 @@ class TranslationCard(QWidget):
     Modern floating dark-themed translation card.
     Supports auto-language detection, OCR from pixmap, and direct text translation.
     """
-    closed = Signal()
+    closed = Signal(object)
     pin_requested = Signal(str)  # Emits translated text for pinning
 
     def __init__(self, parent=None):
@@ -242,36 +242,21 @@ class TranslationCard(QWidget):
 
     def _safe_stop_worker(self):
         if self.trans_worker is not None:
-            try:
-                if self.trans_worker.isRunning():
-                    try:
-                        self.trans_worker.finished_translation.disconnect()
-                    except Exception:
-                        pass
-                    self.trans_worker.requestInterruption()
-                    self.trans_worker.wait(300)
-            except RuntimeError:
-                pass
+            self.trans_worker.safe_stop()
             self.trans_worker = None
 
     def _safe_stop_ocr(self):
         if self.ocr_worker is not None:
-            try:
-                if self.ocr_worker.isRunning():
-                    try:
-                        self.ocr_worker.finished_ocr.disconnect()
-                    except Exception:
-                        pass
-                    self.ocr_worker.requestInterruption()
-                    self.ocr_worker.wait(300)
-            except RuntimeError:
-                pass
+            self.ocr_worker.safe_stop()
             self.ocr_worker = None
 
     def closeEvent(self, event):
         self._safe_stop_ocr()
         self._safe_stop_worker()
-        self.closed.emit()
+        try:
+            self.closed.emit(self)
+        except Exception:
+            pass
         super().closeEvent(event)
 
     # --- Public Translation Triggers ---
