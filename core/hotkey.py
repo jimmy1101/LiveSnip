@@ -50,7 +50,7 @@ if sys.platform == "win32":
 
         def nativeEvent(self, eventType, message):
             try:
-                if eventType == b"windows_generic_MSG" and message:
+                if eventType == b"windows_generic_MSG" and message is not None:
                     addr = int(message)
                     if addr != 0:
                         msg = MSG.from_address(addr)

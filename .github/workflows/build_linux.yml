@@ -67,7 +67,7 @@ jobs:
         chmod +x build_deb.sh run_kylin.sh install_kylin.sh
         VERSION_TAG="${{ github.ref_name }}"
         if [[ ! "${VERSION_TAG#v}" =~ ^[0-9] ]]; then
-          VERSION_TAG="v1.1.5"
+          VERSION_TAG="v1.1.6"
         fi
         ./build_deb.sh "$VERSION_TAG"
 
@@ -79,7 +79,7 @@ jobs:
         cp app.png dist/LiveSnip/
         VERSION_TAG="${{ github.ref_name }}"
         if [[ ! "${VERSION_TAG#v}" =~ ^[0-9] ]]; then
-          VERSION_TAG="v1.1.5"
+          VERSION_TAG="v1.1.6"
         fi
         ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
         tar -czvf "LiveSnip_${VERSION_TAG}_Linux_${ARCH}.tar.gz" -C dist LiveSnip
